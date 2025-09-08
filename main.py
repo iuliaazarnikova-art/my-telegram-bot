@@ -2,7 +2,7 @@ import os
     import logging
     from telegram import Update
     from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-    from flask import Flask, request # Добавляем Flask для совместимости с gunicorn
+    from flask import Flask, request # <-- Добавляем Flask и request
 
     # Включаем логирование
     logging.basicConfig(
@@ -11,23 +11,7 @@ import os
     )
     logger = logging.getLogger(__name__)
 
-    # Обработчик команды /start
-    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        user = update.effective_user
-        await update.message.reply_html(
-            f"Привет, {user.mention_html()}! Я простой эхо-робот. Отправь мне сообщение.",
-        )
-
-    # Обработчик обычных текстовых сообщений (эхо)
-    async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await update.message.reply_text(update.message.text)
-
-    # Обработчик ошибок
-    async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        logger.warning('Update "%s" caused error "%s"', update, context.error)
-
-    # --- ВОТ ЭТА ЧАСТЬ ИЗМЕНИЛАСЬ СУЩЕСТВЕННО! ---
-
+    # --- КОНСТАНТЫ И ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ---
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     APP_URL = os.getenv("APP_URL")
     PORT = 8080 # Жестко задаем порт
@@ -39,51 +23,49 @@ import os
         logger.error("APP_URL environment variable is not set. Please set it to your Timeweb Cloud app URL (e.g., https://my-bot-xxxx.twc1.net). Exiting.")
         raise ValueError("APP_URL environment variable is not set.")
 
-    # Создаём Application
-    application = Application.builder().token(BOT_TOKEN).build()
+    # --- НАСТРОЙКА TELEGRAM БОТА ---
+    # Создаём Application (для telegram-бота)
+    telegram_application = Application.builder().token(BOT_TOKEN).build()
 
     # Добавляем обработчики команд
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-    application.add_error_handler(error_handler)
+    telegram_application.add_handler(CommandHandler("start", start))
+    telegram_application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+    telegram_application.add_error_handler(error_handler)
 
-    # Создаем минимальное Flask-приложение
-    # Это приложение будет запускаться Gunicorn-ом
-    # А наш Telegram-бот будет работать через вебхуки внутри этого же процесса
+    # --- НАСТРОЙКА FLASK ПРИЛОЖЕНИЯ (ДЛЯ GUNICORN) ---
+    # Создаем Flask-приложение, которое будет запускаться Gunicorn-ом
     app = Flask(__name__)
 
     @app.route("/")
-    def hello_world():
-        return "Hello from Timeweb Cloud Bot Backend! Waiting for Telegram webhooks."
+    def index():
+        return "Hello from Timeweb Cloud Bot Backend! Waiting for Telegram webhooks. <br>Your bot token URL path: /" + BOT_TOKEN
 
     @app.route(f"/{BOT_TOKEN}", methods=["POST"])
-    async def telegram_webhook():
+    async def telegram_webhook_handler():
         # Обработка входящих вебхуков от Telegram
-        # Это код из документации python-telegram-bot для вебхуков
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        awaitapplication.process_update(update)
-        return "ok"
+        # Когда Telegram отправляет сообщение, Flask принимает его здесь
+        # и передает нашему telegram_application для обработки.
+        update = Update.de_json(request.get_json(force=True), telegram_application.bot)
+        await telegram_application.process_update(update)return "ok"
 
-    # Теперь в главном блоке запускаем Flask-приложение,
-    # и оно будет запускать webhook-сервер в фоновом режиме.
+    # --- ГЛАВНЫЙ ЗАПУСК ---
     if __name__ == "__main__":
-        logger.info("Starting Flask app and Telegram bot webhook listener...")
-        # Устанавливаем вебхук при старте, если он еще не установлен
-        # Эту часть можно вынести в отдельный скрипт, но для простоты оставим здесь
-        # application.run_webhook() запускает небольшой веб-сервер внутри
-        # Но gunicorn уже будет слушать порт. Поэтому мы должны быть осторожны.
-        # Правильный подход: Flask слушает, а Telegram.ext обрабатывает запросы через Flask.
+        logger.info("Local run: Starting Flask app and Telegram bot webhook listener...")
+        # Устанавливаем вебхук, чтобы Telegram знал, куда отправлять сообщения
+        try:
+            # Для локального запуска webhook_url может быть другим,
+            # но здесь мы используем APP_URL для примера
+            # await telegram_application.bot.set_webhook(url=f"{APP_URL}/{BOT_TOKEN}")
+            # В данном случае, run_webhook() внутри Flask-приложения будет избыточным.
+            # Мы просто устанавливаем вебхук и запускаем Flask.
+            # Flask сам будет слушать порт.
+            pass # Вебхук будет установлен снаружи или через POST запрос
 
-        # Запускаем Flask приложение.
-        # !!! Важно: flask_app.run() здесь не нужен, так как Gunicorn запускает app !!!
-        # Мы просто должны убедиться, что bot.set_webhook вызывается
-        logger.info(f"Setting webhook to: {APP_URL}/{BOT_TOKEN}")
-        # Здесь мы используем синхронную версию set_webhook, так как это не в async функции
-        # Но run_webhook сам устанавливает вебхук, так что это лишнее,
-        # если мы обрабатываем через Flask роут.
-        # application.bot.set_webhook(url=f"{APP_URL}/{BOT_TOKEN}")
+        except Exception as e:
+            logger.error(f"Failed to set webhook on local run: {e}")
 
-        # Запуск Flask-приложения (Gunicorn будет его запускать)
-        app.run(host="0.0.0.0", port=PORT, debug=False) # Эта строка для ЛОКАЛЬНОГО запуска, Gunicorn её игнорирует
+        # Запускаем Flask-приложение для локальной отладки.
+        # Gunicorn будет использовать 'app' как точку входа.
+        app.run(host="0.0.0.0", port=PORT, debug=True)
 
 
