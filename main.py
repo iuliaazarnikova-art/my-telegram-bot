@@ -1,64 +1,65 @@
 import os
-import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+    import logging
+    from telegram import Update
+    from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+    from flask import Flask, request # Добавляем Flask для совместимости с gunicorn
 
-
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    await update.message.reply_html(
-        f"Привет, {user.mention_html()}! Я простой эхо-робот. Отправь мне сообщение.",
+    # Включаем логирование
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
     )
+    logger = logging.getLogger(__name__)
 
+    # Обработчик команды /start
+    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user = update.effective_user
+        await update.message.reply_html(
+            f"Привет, {user.mention_html()}! Я простой эхо-робот. Отправь мне сообщение.",
+        )
 
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(update.message.text)
+    # Обработчик обычных текстовых сообщений (эхо)
+    async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await update.message.reply_text(update.message.text)
 
+    # Обработчик ошибок
+    async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        logger.warning('Update "%s" caused error "%s"', update, context.error)
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logger.warning('Update "%s" caused error "%s"', update, context.error)
+    # --- ВОТ ЭТА ЧАСТЬ ИЗМЕНИЛАСЬ СУЩЕСТВЕННО! ---
 
-def main() -> None:
-    # Секретный код твоего робота из Telegram
     BOT_TOKEN = os.getenv("BOT_TOKEN")
-    # Адрес домика твоего робота в интернете (мы его узнаем чуть позже)
     APP_URL = os.getenv("APP_URL")
-        PORT = 8080
+    PORT = 8080 # Жестко задаем порт
 
     if not BOT_TOKEN:
-        logger.error("BOT_TOKEN не установлен. Робот не может запуститься.")
-        return
+        logger.error("BOT_TOKEN environment variable is not set. Exiting.")
+        raise ValueError("BOT_TOKEN environment variable is not set.")
     if not APP_URL:
-        logger.error("APP_URL не установлен. Робот не знает своего адреса в интернете.")
-        return
+        logger.error("APP_URL environment variable is not set. Please set it to your Timeweb Cloud app URL (e.g., https://my-bot-xxxx.twc1.net). Exiting.")
+        raise ValueError("APP_URL environment variable is not set.")
 
-    
+    # Создаём Application
     application = Application.builder().token(BOT_TOKEN).build()
 
-    
+    # Добавляем обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
     application.add_error_handler(error_handler)
 
-    
-    logger.info("Запускаю робота через вебхуки...")
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=BOT_TOKEN, 
-        webhook_url=f"{APP_URL}/{BOT_TOKEN}"
-    )
-    logger.info("Робот запущен и ждет сообщений!")
+    # Создаем минимальное Flask-приложение
+    # Это приложение будет запускаться Gunicorn-ом
+    # А наш Telegram-бот будет работать через вебхуки внутри этого же процесса
+    app = Flask(__name__)
 
+    @app.route("/")
+    def hello_world():
+        return "Hello from Timeweb Cloud Bot Backend! Waiting for Telegram webhooks."
 
-if __name__ == "__main__":
-
-    main()
+    @app.route(f"/{BOT_TOKEN}", methods=["POST"])
+    async def telegram_webhook():
+        # Обработка входящих вебхуков от Telegram
+        # Это код из документации python-telegram-bot для вебхуков
+        update = Update.de_json(request.get_json(force=True), application.bot)
+        await
 
