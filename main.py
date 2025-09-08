@@ -61,5 +61,29 @@ import os
         # Обработка входящих вебхуков от Telegram
         # Это код из документации python-telegram-bot для вебхуков
         update = Update.de_json(request.get_json(force=True), application.bot)
-        await
+        awaitapplication.process_update(update)
+        return "ok"
+
+    # Теперь в главном блоке запускаем Flask-приложение,
+    # и оно будет запускать webhook-сервер в фоновом режиме.
+    if __name__ == "__main__":
+        logger.info("Starting Flask app and Telegram bot webhook listener...")
+        # Устанавливаем вебхук при старте, если он еще не установлен
+        # Эту часть можно вынести в отдельный скрипт, но для простоты оставим здесь
+        # application.run_webhook() запускает небольшой веб-сервер внутри
+        # Но gunicorn уже будет слушать порт. Поэтому мы должны быть осторожны.
+        # Правильный подход: Flask слушает, а Telegram.ext обрабатывает запросы через Flask.
+
+        # Запускаем Flask приложение.
+        # !!! Важно: flask_app.run() здесь не нужен, так как Gunicorn запускает app !!!
+        # Мы просто должны убедиться, что bot.set_webhook вызывается
+        logger.info(f"Setting webhook to: {APP_URL}/{BOT_TOKEN}")
+        # Здесь мы используем синхронную версию set_webhook, так как это не в async функции
+        # Но run_webhook сам устанавливает вебхук, так что это лишнее,
+        # если мы обрабатываем через Flask роут.
+        # application.bot.set_webhook(url=f"{APP_URL}/{BOT_TOKEN}")
+
+        # Запуск Flask-приложения (Gunicorn будет его запускать)
+        app.run(host="0.0.0.0", port=PORT, debug=False) # Эта строка для ЛОКАЛЬНОГО запуска, Gunicorn её игнорирует
+
 
