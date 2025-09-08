@@ -31,7 +31,11 @@ def main() -> None:
     # Адрес домика твоего робота в интернете (мы его узнаем чуть позже)
     APP_URL = os.getenv("APP_URL")
     # Дверь, через которую сообщения будут приходить (Timeweb Cloud сам знает, какую выбрать)
-    PORT = int(os.getenv("PORT", "8080"))
+    # Порт, который будет слушать приложение. Timeweb Cloud обычно использует 8080.
+    PORT = int(os.getenv("PORT", 8080))
+    # Для Timeweb Cloud иногда нужно явно указать 8080, если он не передает PORT
+    if os.getenv("TWC_APP_ID"): # Проверяем, что это Timeweb Cloud
+        PORT = 8080
 
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN не установлен. Робот не может запуститься.")
@@ -60,4 +64,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+
     main()
